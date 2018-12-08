@@ -4,7 +4,7 @@
 * ACTIONS
 ** TODO Collect minerals
 *** TODO Build Supply Depots
-** TODO Defense
+** TODO Defensex
 ** TODO Build Units
 *** TODO Build Marines
 *** TODO Build Equipment
