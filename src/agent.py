@@ -3,7 +3,7 @@ from pysc2.lib import actions
 from pysc2.lib import features
 from pysc2.lib import units
 
-import sys, numpy, time
+import sys, numpy, time, math
 
 # Features
 _PLAYER_SELF = features.PlayerRelative.SELF
@@ -29,7 +29,7 @@ _NOT_QUEUED = [0]
 _SCREEN = [0]
 _SELECT = [0]
 
-#COSTS
+# Costs
 _SUPPLY_DEPOT_COST = [100, 0]
 _BARRACKS_COST = [150, 0]
 _SCV_COST = [50, 0]
@@ -88,8 +88,9 @@ class Bot64(base_agent.BaseAgent):
 
         # buildings
         self.nb_supply_depot = 0
-        self.nb_supply_depot_in_build = 0
         self.nb_barracks = 0
+        self.supply_depot_last_location = [-1, -1]
+        self.prev_total_value_structures = 400 # CC
 
         # units
         self.nb_scv = 12
@@ -98,9 +99,9 @@ class Bot64(base_agent.BaseAgent):
         self.nb_scv_in_train = 0
 
         # rates
-        self.supply_depot_rate = 1
+        self.supply_depot_rate = 8
         self.barracks_rate = 0
-        self.scv_rate = nb_scv
+        self.scv_rate = self.nb_scv + 20
 
         # flags
         self.scv_training_counter = 0
@@ -111,10 +112,25 @@ class Bot64(base_agent.BaseAgent):
         self.marine_selected = False
         self.attack_mode_on = False
         self.enemy = None
+        self.spawned_right_side = False
+        self.supply_depot_in_construction = False
+        self.barrack_in_construction = False
+
+    def update_buildings(self, obs):
+        total_value_structures = obs.observation.score_cumulative.total_value_structures
+        if total_value_structures != self.prev_total_value_structures:
+            diff = (total_value_structures - self.prev_total_value_structures)
+            if diff == sum(_SUPPLY_DEPOT_COST):
+                self.supply_depot_in_construction = False
+                print("change flag supply_depot_in construction to False")
+            elif diff == sum(_BARRACKS_COST):
+                self.barrack_in_construction = False
+            self.prev_total_value_structures = total_value_structures
                 
     def step(self, obs):
         super(Bot64, self).step(obs)
 
+        self.update_buildings(obs)
         resources = [obs.observation.score_cumulative.collected_minerals,
                      obs.observation.score_cumulative.collected_vespene]
 
@@ -135,15 +151,15 @@ class Bot64(base_agent.BaseAgent):
         #     return define_action(obs, _HARVEST_RETURN_QUICK, [_NOT_QUEUED])
         
         # Build supply depot
-        if self.nb_supply_depot <= self.supply_depot_rate:
+        if self.nb_supply_depot <= self.supply_depot_rate and self.supply_depot_in_construction == False:
             if has_enough_ressources(_SUPPLY_DEPOT_COST, resources):
                 self.barracks_rate += 1 if self.nb_supply_depot >=  2 else 0
-                return self.build_supply_depot()
-
-        # Build barrack
-        if self.nb_barracks < self.barracks_rate:
-            if has_enough_ressources(_BARRACKS_COST, resources):
-                return self.build_barrack()
+                print("tried to construct building")
+                return self.build_supply_depot(obs)
+        # # Build barrack
+        # if self.nb_barracks < self.barracks_rate:
+        #     if has_enough_ressources(_BARRACKS_COST, resources):
+        #         return self.build_barrack()
 
         # Train SCV
         if self.scv_training_counter > 0 and self.scv_training_counter < 5:
@@ -154,19 +170,103 @@ class Bot64(base_agent.BaseAgent):
         # Train more SCVs
         if self.nb_scv <= self.scv_rate:
             if has_enough_ressources([i * 5 for i in _SCV_COST], resources):
-                self.scv_rate += 1
                 self.scv_training_counter += 1
 
-        # Train Marine
-        if self.marine_training_counter > 0 and self.marine_training_counter < 5:
-            self.marine_training_counter += 1
-            return self.train_Marine(obs)
-        self.marine_training_counter = 0
+        # # Train Marine
+        # if self.marine_training_counter > 0 and self.marine_training_counter < 5:
+        #     self.marine_training_counter += 1
+        #     return self.train_Marine(obs)
+        # self.marine_training_counter = 0
         
-        # Train more Marines
-        if self.nb_marine <= self.marine_rate:
-            if has_enough_ressources([i * 5 for i in _MARINE_COST], resources):
-                self.marine_rate += 1
-                self.marine_training_counter += 1
+        # # Train more Marines
+        # if self.nb_marine <= self.marine_rate:
+        #     if has_enough_ressources([i * 5 for i in _MARINE_COST], resources):
+        #         self.marine_rate += 1
+        #         self.marine_training_counter += 1
     
         return _FUNCTIONS.no_op()
+
+    def build_supply_depot(self, obs):
+
+        if self.inactive_scv_selected == False and self.random_scv_selected == False:
+            return self.select_unit_or_building(obs, "scv")
+
+        if _BUILD_SUPPLYDEPOT_SCREEN in obs.observation.available_actions:
+            self.nb_supply_depot += 1
+            target = self.get_new_supply_depot_location(obs)
+            self.supply_depot_in_construction = True
+            print("succeded")
+            return _FUNCTIONS.Build_SupplyDepot_screen("queued", target)
+
+        print("failed")
+        return _FUNCTIONS.no_op()
+
+    def get_new_supply_depot_location(self, obs):
+        if self.supply_depot_last_location == [-1,-1]:
+            unit_type = obs.observation.feature_screen[_UNIT_TYPE]
+            x_coord = (unit_type == units.Neutral.MineralField).nonzero()[0]
+            self.spawned_right_side = numpy.mean(x_coord, axis=0).round() > 42
+
+            if self.spawned_right_side:
+                self.supply_depot_last_location = [10, 10]
+            else:
+                self.supply_depot_last_location = [73,73]
+        else:                
+            self.supply_depot_last_location[1] += 7 if self.spawned_right_side else -7
+            
+        return self.supply_depot_last_location
+                
+
+    def select_unit_or_building(self, obs, unit_or_building):
+        if unit_or_building == "scv":
+            if self.inactive_scv_selected == False:
+                if _SELECT_IDLE_WORKER in obs.observation.available_actions:
+                    print("selected iddle worker")
+                    self.inactive_scv_selected = True
+                    self.random_scv_selected = False
+                    self.commandcenter_selected = False
+                    self.marine_selected = False
+                    return _FUNCTIONS.select_idle_worker("select")
+            if self.random_scv_selected == False:
+                print("selected random worker")
+                self.random_scv_selected = True
+                self.inactive_scv_selected = False
+                self.commandcenter_selected = False
+                self.marine_selected = False
+                unit_type = obs.observation.feature_screen[_UNIT_TYPE]
+                scv_y, scv_x = (unit_type == units.Terran.SCV).nonzero()
+                target = [scv_x[0], scv_y[0]]
+                return define_action(obs, _SELECT_POINT, [_SCREEN, target])
+        elif unit_or_building == "cc":
+            if self.commandcenter_selected == False:
+                self.commandcenter_selected = True
+                self.inactive_scv_selected = False
+                self.random_scv_selected = False
+                self.marine_selected = False
+                unit_type = obs.observation.feature_screen[_UNIT_TYPE]
+                commandcenter_y, commandcenter_x = (unit_type == units.Terran.CommandCenter).nonzero()
+                cc_center_x = numpy.mean(commandcenter_x, axis=0).round()
+                cc_center_y = numpy.mean(commandcenter_y, axis=0).round()
+                target = [cc_center_x, cc_center_y]
+                return _FUNCTIONS.select_point("select", target)
+            
+        return _FUNCTIONS.no_op()
+
+    def train_SCV(self, obs):
+        if self.commandcenter_selected == False:
+            return self.select_unit_or_building(obs, "cc")
+        
+        if _TRAIN_SCV_QUICK in obs.observation.available_actions:
+            self.nb_scv_in_train += 1
+            return _FUNCTIONS.Train_SCV_quick("now")
+        return actions.FUNCTIONS.no_op()
+
+    # def train_Marine(self, obs):
+    #     if self.barrack_selected == False:
+    #         return self.select_unit_or_building(obs, "br")
+        
+    #     if _TRAIN_MARINE_QUICK in obs.observation.available_actions:
+    #         self.nb_marines_in_train += 1
+    #         return _FUNCTIONS.Train_Marine_quick("select")
+    #     return actions.FUNCTIONS.no_op()
+
