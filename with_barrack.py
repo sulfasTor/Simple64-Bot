@@ -184,7 +184,7 @@ class Bot64(base_agent.BaseAgent):
                 self.barracks_rate += 1 if self.nb_supply_depot >=  2 else 0
                 return self.build_supply_depot(obs)
         #Build barrack
-        if self.nb_barracks < self.barracks_rate:
+        if self.nb_barracks < self.barracks_rate and self.nb_barracks < 10:
             if has_enough_ressources(_BARRACKS_COST, resources):
                 return self.build_barrack(obs)
 
