@@ -3,8 +3,9 @@ from pysc2.lib import actions
 from pysc2.lib import features
 from pysc2.lib import units
 from random import randrange
+from time import sleep
 
-import sys, numpy, time, math
+import sys, numpy, math
 
 # Features
 _PLAYER_SELF = features.PlayerRelative.SELF
@@ -70,6 +71,14 @@ def define_action(obs, action_id, args=[]):
 def has_enough_ressources(wanted_ressource, ressources):
     return wanted_ressource[0] <= ressources[0] and wanted_ressource[1] <= ressources[1]
 
+def get_mineral_coord(obs):
+    unit_type = obs.observation.feature_screen[_UNIT_TYPE]
+    mine = (unit_type == units.Neutral.MineralField)
+    mine = erode_with_min(mine)
+    mineral_y, mineral_x = numpy.array(mine).nonzero()
+    return [mineral_x[0], mineral_y[0]]
+
+
 # python3 -m pysc2.bin.agent --map Simple64 --agent agent.Bot64 --agent_race terran
 class Bot64(base_agent.BaseAgent):
 
@@ -83,6 +92,10 @@ class Bot64(base_agent.BaseAgent):
     def reset(self):
         super(Bot64, self).reset()
 
+        # spending
+        self.spent_on_scv_training = 0
+        self.spent_on_supply_depots = 0
+        
         # buildings
         self.nb_supply_depot = 0
         self.nb_barracks = 0
@@ -96,15 +109,16 @@ class Bot64(base_agent.BaseAgent):
         self.nb_scv_in_train = 0
 
         # rates
-        self.supply_depot_rate = 20
+        self.supply_depot_rate = 3
         self.barracks_rate = 0
-        self.scv_rate = 20
+        self.scv_rate = 13
 
         # flags
         self.scv_training_counter = 0
         self.marine_training_counter = 0
         self.commandcenter_selected = False
         self.inactive_scv_selected = False
+        self.all_inactive_scv_selected = False
         self.random_scv_selected = False
         self.marine_selected = False
         self.attack_mode_on = False
@@ -115,17 +129,25 @@ class Bot64(base_agent.BaseAgent):
 
     def update_buildings(self, obs):
         total_value_structures = obs.observation.score_cumulative.total_value_structures
+        spent_minerals = obs.observation.score_cumulative.spent_minerals
         if total_value_structures != self.prev_total_value_structures:
             diff = (total_value_structures - self.prev_total_value_structures)
             if diff == sum(_SUPPLY_DEPOT_COST):
                 self.nb_supply_depot += 1
                 self.supply_depot_in_construction = False
+                self.scv_rate += 5
                 print("changed flag supply_depot_in construction to False")
             elif diff == sum(_BARRACKS_COST):
                 self.nb_barracks += 1
                 self.barrack_in_construction = False
             self.prev_total_value_structures = total_value_structures
-                
+
+        print("-----spent_minerals (%d)------\n\t- supply depot = %d \n\t- scv = %d" %(spent_minerals, self.spent_on_supply_depots, self.spent_on_scv_training))
+        if spent_minerals != (self.spent_on_supply_depots + self.spent_on_scv_training) :
+            print("Failed to construct a supply depot")
+            self.spent_on_supply_depots -= sum(_SUPPLY_DEPOT_COST)
+            self.supply_depot_in_construction = False
+                                
     def step(self, obs):
         super(Bot64, self).step(obs)
 
@@ -164,11 +186,24 @@ class Bot64(base_agent.BaseAgent):
             self.scv_training_counter += 1
             return self.train_SCV(obs)
         self.scv_training_counter = 0
+        self.supply_depot_rate += 1
         
         # Train more SCVs
         if self.nb_scv <= self.scv_rate:
             if has_enough_ressources([i * 5 for i in _SCV_COST], resources):
                 self.scv_training_counter += 1
+
+        # Send idle workers to harvest
+        if _SELECT_IDLE_WORKER in obs.observation.available_actions:
+            self.all_inactive_scv_selected = True
+            return _FUNCTIONS.select_idle_worker("select")
+
+        if self.all_inactive_scv_selected:
+            print("sent idle workers to harvest")
+            # dest = get_mineral_coord(obs)
+            self.all_inactive_scv_selected = False
+            # return _FUNCTIONS.Harvest_Gather_screen("queued", dest)
+            return _FUNCTIONS.Harvest_Return_quick("queued")
 
         # # Train Marine
         # if self.marine_training_counter > 0 and self.marine_training_counter < 5:
@@ -181,25 +216,25 @@ class Bot64(base_agent.BaseAgent):
         #     if has_enough_ressources([i * 5 for i in _MARINE_COST], resources):
         #         self.marine_rate += 1
         #         self.marine_training_counter += 1
-    
+
+        # print("no op")
         return _FUNCTIONS.no_op()
-
+    
     def build_supply_depot(self, obs):
-
         if self.inactive_scv_selected == False and self.random_scv_selected == False:
-            print("trying to select a scv...")
+            print("TRYING TO SELECT A SCV...")
             return self.select_unit_or_building(obs, "scv")
 
         if _BUILD_SUPPLYDEPOT_SCREEN in obs.observation.available_actions:
-            target = self.get_new_supply_depot_location(obs)
-            print("---------- target is [%d, %d] ------------" %(target[0], target[0]))
             self.supply_depot_in_construction = True
-            print("changed flag supply_depot_in construction to True; succeded")
+            target = self.get_new_supply_depot_location(obs)
+            print("---------- target of payed sp is [%d, %d] ------------" %(target[0], target[0]))
+            self.spent_on_supply_depots += sum(_SUPPLY_DEPOT_COST)
             return _FUNCTIONS.Build_SupplyDepot_screen("queued", target)
 
         self.inactive_scv_selected = False
         self.random_scv_selected = False
-        print("failed with %s selected" %("random" if self.random_scv_selected else ("idle worker" if self.inactive_scv_selected else "nothing")))
+        print("\nFailed to select %s \n" %("a random worker" if self.random_scv_selected else ("a idle worker" if self.inactive_scv_selected else "anything")))
         return _FUNCTIONS.no_op()
 
     def get_new_supply_depot_location(self, obs):
@@ -215,25 +250,33 @@ class Bot64(base_agent.BaseAgent):
         else:
             unit_type = obs.observation.feature_screen[_UNIT_TYPE]
             sp_y, sp_x = (unit_type == units.Terran.SupplyDepot).nonzero()
-            self.supply_depot_last_location[0] = sp_x[1]
-            self.supply_depot_last_location[1] = sp_y[1] + (5 if self.spawned_right_side else -5)
+            rand_idx = randrange(len(sp_x))
+            print("randix is %d" %(rand_idx))
 
-            if  self.supply_depot_last_location[1] < 0 or  self.supply_depot_last_location[1] > 83:
-                self.supply_depot_last_location[1] = sp_y[-1 if self.spawned_right_side else 0]
-                self.supply_depot_last_location[0] += (-4 if self.spawned_right_side else 4)
+            if self.spawned_right_side:
+                self.supply_depot_last_location[1] = sp_y[rand_idx] + 5
+            else:
+                self.supply_depot_last_location[1] = sp_y[rand_idx] - 5
+                
+            while self.supply_depot_last_location[0] < 0 or self.supply_depot_last_location[0] > 83 or \
+                   self.supply_depot_last_location[1] < 0 or self.supply_depot_last_location[1] > 83:
+                   rand_idx = randrange(len(sp_x))
+                   print("randix is %d" %(rand_idx))
+                   self.supply_depot_last_location[0] = sp_x[rand_idx] + (5 if self.spawned_right_side else -5)
+                   self.supply_depot_last_location[1] = sp_y[rand_idx] + (5 if self.spawned_right_side else -5)
 
         return self.supply_depot_last_location
                 
 
     def select_unit_or_building(self, obs, unit_or_building):
         if unit_or_building == "scv":
-            if self.inactive_scv_selected == False:
-                if _SELECT_IDLE_WORKER in obs.observation.available_actions:
-                    self.inactive_scv_selected = True
-                    self.random_scv_selected = False
-                    self.commandcenter_selected = False
-                    self.marine_selected = False
-                    return _FUNCTIONS.select_idle_worker("select")
+            # if self.inactive_scv_selected == False:
+            #     if _SELECT_IDLE_WORKER in obs.observation.available_actions:
+            #         self.inactive_scv_selected = True
+            #         self.random_scv_selected = False
+            #         self.commandcenter_selected = False
+            #         self.marine_selected = False
+            #         return _FUNCTIONS.select_idle_worker("select")
             if self.random_scv_selected == False:
                 self.random_scv_selected = True
                 self.inactive_scv_selected = False
@@ -243,8 +286,6 @@ class Bot64(base_agent.BaseAgent):
                 scv_y, scv_x = (unit_type == units.Terran.SCV).nonzero()
                 rand_idx = randrange(len(scv_y))
                 target = [scv_x[rand_idx], scv_y[rand_idx]]
-                print("--------------- 1st selection target is [%d, %d] ---------------" %(scv_x[0], scv_y[0]))
-                print("--------------- last selection target is [%d, %d]---------------" %(scv_x[-1], scv_y[-1]))
                 return define_action(obs, _SELECT_POINT, [_SCREEN, target])
         elif unit_or_building == "cc":
             if self.commandcenter_selected == False:
@@ -267,7 +308,9 @@ class Bot64(base_agent.BaseAgent):
         
         if _TRAIN_SCV_QUICK in obs.observation.available_actions:
             self.nb_scv += 1
-            return _FUNCTIONS.Train_SCV_quick("now")
+            self.spent_on_scv_training += sum(_SCV_COST)
+            print("started training of a scv")
+            return _FUNCTIONS.Train_SCV_quick("queued")
         return actions.FUNCTIONS.no_op()
 
     # def train_Marine(self, obs):
