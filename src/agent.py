@@ -2,6 +2,7 @@ from pysc2.agents import base_agent
 from pysc2.lib import actions
 from pysc2.lib import features
 from pysc2.lib import units
+from random import randrange
 
 import sys, numpy, time, math
 
@@ -60,10 +61,6 @@ def print_screen(mine):
             printf("%d", mine[i][j])
             print("")
 
-def xy_locs(mask):
-    y, x = mask.nonzero()
-    return list(zip(x, y))
-
 def define_action(obs, action_id, args=[]):
     if action_id in obs.observation.available_actions:
         return actions.FunctionCall(action_id, args)
@@ -99,9 +96,9 @@ class Bot64(base_agent.BaseAgent):
         self.nb_scv_in_train = 0
 
         # rates
-        self.supply_depot_rate = 8
+        self.supply_depot_rate = 20
         self.barracks_rate = 0
-        self.scv_rate = self.nb_scv + 20
+        self.scv_rate = 20
 
         # flags
         self.scv_training_counter = 0
@@ -121,9 +118,11 @@ class Bot64(base_agent.BaseAgent):
         if total_value_structures != self.prev_total_value_structures:
             diff = (total_value_structures - self.prev_total_value_structures)
             if diff == sum(_SUPPLY_DEPOT_COST):
+                self.nb_supply_depot += 1
                 self.supply_depot_in_construction = False
-                print("change flag supply_depot_in construction to False")
+                print("changed flag supply_depot_in construction to False")
             elif diff == sum(_BARRACKS_COST):
+                self.nb_barracks += 1
                 self.barrack_in_construction = False
             self.prev_total_value_structures = total_value_structures
                 
@@ -154,7 +153,6 @@ class Bot64(base_agent.BaseAgent):
         if self.nb_supply_depot <= self.supply_depot_rate and self.supply_depot_in_construction == False:
             if has_enough_ressources(_SUPPLY_DEPOT_COST, resources):
                 self.barracks_rate += 1 if self.nb_supply_depot >=  2 else 0
-                print("tried to construct building")
                 return self.build_supply_depot(obs)
         # # Build barrack
         # if self.nb_barracks < self.barracks_rate:
@@ -189,31 +187,41 @@ class Bot64(base_agent.BaseAgent):
     def build_supply_depot(self, obs):
 
         if self.inactive_scv_selected == False and self.random_scv_selected == False:
+            print("trying to select a scv...")
             return self.select_unit_or_building(obs, "scv")
 
         if _BUILD_SUPPLYDEPOT_SCREEN in obs.observation.available_actions:
-            self.nb_supply_depot += 1
             target = self.get_new_supply_depot_location(obs)
+            print("---------- target is [%d, %d] ------------" %(target[0], target[0]))
             self.supply_depot_in_construction = True
-            print("succeded")
+            print("changed flag supply_depot_in construction to True; succeded")
             return _FUNCTIONS.Build_SupplyDepot_screen("queued", target)
 
-        print("failed")
+        self.inactive_scv_selected = False
+        self.random_scv_selected = False
+        print("failed with %s selected" %("random" if self.random_scv_selected else ("idle worker" if self.inactive_scv_selected else "nothing")))
         return _FUNCTIONS.no_op()
 
     def get_new_supply_depot_location(self, obs):
         if self.supply_depot_last_location == [-1,-1]:
             unit_type = obs.observation.feature_screen[_UNIT_TYPE]
-            x_coord = (unit_type == units.Neutral.MineralField).nonzero()[0]
-            self.spawned_right_side = numpy.mean(x_coord, axis=0).round() > 42
+            y_coord = (unit_type == units.Neutral.MineralField).nonzero()[0]
+            self.spawned_right_side = numpy.mean(y_coord, axis=0).round() > 42
 
             if self.spawned_right_side:
                 self.supply_depot_last_location = [10, 10]
             else:
                 self.supply_depot_last_location = [73,73]
-        else:                
-            self.supply_depot_last_location[1] += 7 if self.spawned_right_side else -7
-            
+        else:
+            unit_type = obs.observation.feature_screen[_UNIT_TYPE]
+            sp_y, sp_x = (unit_type == units.Terran.SupplyDepot).nonzero()
+            self.supply_depot_last_location[0] = sp_x[1]
+            self.supply_depot_last_location[1] = sp_y[1] + (5 if self.spawned_right_side else -5)
+
+            if  self.supply_depot_last_location[1] < 0 or  self.supply_depot_last_location[1] > 83:
+                self.supply_depot_last_location[1] = sp_y[-1 if self.spawned_right_side else 0]
+                self.supply_depot_last_location[0] += (-4 if self.spawned_right_side else 4)
+
         return self.supply_depot_last_location
                 
 
@@ -221,21 +229,22 @@ class Bot64(base_agent.BaseAgent):
         if unit_or_building == "scv":
             if self.inactive_scv_selected == False:
                 if _SELECT_IDLE_WORKER in obs.observation.available_actions:
-                    print("selected iddle worker")
                     self.inactive_scv_selected = True
                     self.random_scv_selected = False
                     self.commandcenter_selected = False
                     self.marine_selected = False
                     return _FUNCTIONS.select_idle_worker("select")
             if self.random_scv_selected == False:
-                print("selected random worker")
                 self.random_scv_selected = True
                 self.inactive_scv_selected = False
                 self.commandcenter_selected = False
                 self.marine_selected = False
                 unit_type = obs.observation.feature_screen[_UNIT_TYPE]
                 scv_y, scv_x = (unit_type == units.Terran.SCV).nonzero()
-                target = [scv_x[0], scv_y[0]]
+                rand_idx = randrange(len(scv_y))
+                target = [scv_x[rand_idx], scv_y[rand_idx]]
+                print("--------------- 1st selection target is [%d, %d] ---------------" %(scv_x[0], scv_y[0]))
+                print("--------------- last selection target is [%d, %d]---------------" %(scv_x[-1], scv_y[-1]))
                 return define_action(obs, _SELECT_POINT, [_SCREEN, target])
         elif unit_or_building == "cc":
             if self.commandcenter_selected == False:
@@ -257,7 +266,7 @@ class Bot64(base_agent.BaseAgent):
             return self.select_unit_or_building(obs, "cc")
         
         if _TRAIN_SCV_QUICK in obs.observation.available_actions:
-            self.nb_scv_in_train += 1
+            self.nb_scv += 1
             return _FUNCTIONS.Train_SCV_quick("now")
         return actions.FUNCTIONS.no_op()
 
