@@ -131,7 +131,7 @@ class Bot64(base_agent.BaseAgent):
         self.supply_depot_rate = 3 # Add 1
         self.barracks_rate = 1
         self.scv_rate = 15
-        self.marines_rate = 25
+        self.marines_rate = 18
 
         # counters
         self.scv_training_counter = 0
@@ -226,7 +226,7 @@ class Bot64(base_agent.BaseAgent):
             return self.train_SCV(obs)
         self.scv_training_counter = 0
         
-        # Train more SCVs
+        # Turn on SCV training
         if self.nb_scv <= self.scv_rate:
             if has_enough_ressources([i * 5 for i in _SCV_COST], resources):
                 self.scv_training_counter += 1 # First increment
@@ -260,12 +260,18 @@ class Bot64(base_agent.BaseAgent):
             return self.train_Marine(obs)
         self.marine_training_counter = 0
         
-        # Train more Marines
+        # Turn on Marine training
         if self.nb_barracks > 0 and self.nb_marines <= self.marines_rate:
             if has_enough_ressources([i * 5 for i in _MARINE_COST], resources):
                 self.marine_training_counter += 1
                 if self.nb_marines > 20:
                     self.supply_depot_rate += 3
+
+        # if self.nb_marines >= self.marines_rate:
+        #     self.supply_depot_rate += 5
+        #     self.barracks_rate += 1
+        #     self.scv_rate += 10
+        #     self.marines_rate += 5
 
         # print("no op")
         return _FUNCTIONS.no_op()
@@ -368,9 +374,9 @@ class Bot64(base_agent.BaseAgent):
         if len(sp_y) == 0:
             if self.spawned_right_side:
                 #                            [29, 29]
-                self.barrack_last_location = [27, 27]
+                self.barrack_last_location = [25, 25]
             else:
-                self.barrack_last_location = [10, 50]
+                self.barrack_last_location = [73, 25]
         else:
             rand_idx = randrange(len(sp_x))
             print("randix is %d" %(rand_idx))
@@ -427,18 +433,18 @@ class Bot64(base_agent.BaseAgent):
                 self.inactive_scv_selected = False
                 self.random_scv_selected = False
                 self.marine_selected = False
-                # unit_type = obs.observation.feature_screen[_UNIT_TYPE]
-                # br_y, br_x = (unit_type == units.Terran.Barracks).nonzero()
-                # rand_idx = randrange(len(br_y))
-                # target = [br_x[rand_idx], br_y[rand_idx]]
-                # return define_action(obs, _SELECT_POINT, [_SCREEN, target])
+                # if self.nb_barracks > 1:
+                #     unit_type = obs.observation.feature_screen[_UNIT_TYPE]
+                #     br_y, br_x = (unit_type == units.Terran.Barracks).nonzero()
+                #     rand_idx = randrange(len(br_y))
+                #     target = [br_x[rand_idx], br_y[rand_idx]]
+                #     return define_action(obs, _SELECT_POINT, [_SCREEN, target])
                 unit_type = obs.observation.feature_screen[_UNIT_TYPE]
                 y, x = (unit_type == units.Terran.Barracks).nonzero()
                 br_x = numpy.mean(x, axis=0).round()
                 br_y = numpy.mean(y, axis=0).round()
                 return _FUNCTIONS.select_point("select", [br_x, br_y])
-                
-            
+                            
         return _FUNCTIONS.no_op()
 
     def train_SCV(self, obs):
