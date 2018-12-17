@@ -45,6 +45,9 @@ _SCV_COST = [50, 0]
 _MARINE_COST = [50, 0]
 _MARAUDER_COST = [100, 25]
 
+def _xy_locs(mask):
+    y, x = mask.nonzero()
+    return list(zip(x, y))
 
 def printf(format, *args):
     sys.stdout.write(format % args)
@@ -106,6 +109,10 @@ class Bot64(base_agent.BaseAgent):
     def reset(self):
         super(Bot64, self).reset()
 
+        # camera
+        self.locationR = [36,43]
+        self.locationL = [18,21]
+
         # spending
         self.spent_on_scv_training = 0
         self.spent_on_supply_depots = 0
@@ -128,10 +135,10 @@ class Bot64(base_agent.BaseAgent):
 
         # rates
         self.refineries_rate = 1
-        self.supply_depot_rate = 3 # Add 1
+        self.supply_depot_rate = 5 # Add 1
         self.barracks_rate = 1
         self.scv_rate = 15
-        self.marines_rate = 18
+        self.marines_rate = 15
 
         # counters
         self.scv_training_counter = 0
@@ -160,28 +167,33 @@ class Bot64(base_agent.BaseAgent):
     def update_buildings(self, obs):
         total_value_structures = obs.observation.score_cumulative.total_value_structures
         spent_minerals = obs.observation.score_cumulative.spent_minerals
+
         if total_value_structures != self.prev_total_value_structures:
             diff = (total_value_structures - self.prev_total_value_structures)
             if self.nb_supply_depot < self.supply_depot_rate:
                 if diff == sum(_SUPPLY_DEPOT_COST):
                     self.nb_supply_depot += 1
                     self.supply_depot_in_construction = False
-                    self.scv_rate += 5
+                    # self.scv_rate += 5
                     self.supply_depot_construction_tries = 0
-                    print("changed flag supply_depot_in construction to False")
+            elif self.nb_barracks < self.barracks_rate:
+                if diff == sum(_BARRACKS_COST):
+                    self.nb_barracks += 1
+                    # self.supply_depot_rate += 1
+                    self.barrack_in_construction = False
             elif self.nb_refineries < self.refineries_rate:
                 if diff == sum(_REFINERY_COST):
                     self.nb_refineries += 1
                     self.refinery_in_construction = False
             else:
-                if diff == sum(_BARRACKS_COST):
-                    self.nb_barracks += 1
-                    self.barrack_in_construction = False
-                
+                print("reached end of building verification without conflicts")
+                  
         self.prev_total_value_structures = total_value_structures
 
-        if spent_minerals != (self.spent_on_supply_depots + self.spent_on_scv_training + self.spent_on_refinery + self.spent_on_barracks) :
-            if (self.nb_refineries >= self.refineries_rate):
+        expected_spent_minerals = self.spent_on_supply_depots + self.spent_on_scv_training + self.spent_on_refinery + self.spent_on_barracks
+        if spent_minerals != expected_spent_minerals:
+            if self.nb_supply_depot >= self.supply_depot_rate:
+                print("Spent minerals: %d, expected %d" %(spent_minerals, expected_spent_minerals))
                 print("Failed to construct a barrack")
                 self.spent_on_barracks -= sum(_BARRACKS_COST)
                 self.barrack_in_construction = False
@@ -190,7 +202,7 @@ class Bot64(base_agent.BaseAgent):
                 self.supply_depot_construction_tries += 1
                 self.spent_on_supply_depots -= sum(_SUPPLY_DEPOT_COST)
                 self.supply_depot_in_construction = False
-                                       
+                
     def step(self, obs):
         super(Bot64, self).step(obs)
         self.update_buildings(obs)
@@ -198,30 +210,31 @@ class Bot64(base_agent.BaseAgent):
                      obs.observation.score_cumulative.collected_vespene]
 
         self.print_state()        
-        # # Check for enemies
-        # self.enemy = xy_locs(obs.observation.feature_screen.player_relative == _PLAYER_ENEMY)
-        
-        # if self.enemy and self.nb_marines > 0:
-        #     if not self.marine_selected:
+        # Check for enemies
+        # if self.nb_marines > 20:
+        #     self.enemy = None
+        #     self.enemy = _xy_locs(obs.observation.feature_screen.player_relative == _PLAYER_ENEMY)
+            
+        #     if self.enemy:
+        #         if not _ATTACK_SCREEN in obs.observation.available_actions:
+        #             if self.spawned_right_side:
+        #                 return define_action(obs, _SELECT_RECT, [_SELECT, [42,42], [83,83]])
+        #             return define_action(obs, _SELECT_RECT, [_SELECT, [83,83], [42,42]])
                 
-        #     if not _ATTACK_SCREEN in obs.observation.available_actions:
-        #         return define_action(obs, _SELECT_RECT, [_SELECT, [0,0], [83,83]])
-
         #     if not self.attack_mode_on:
         #         target = self.enemy[numpy.argmax(numpy.array(self.enemy)[:, 1])]
         #         self.attack_mode_on = True
         #         self.harvest_mode_on = False
         #         return define_action(obs, _ATTACK_SCREEN, [_SELECT, target])
         #     return define_action(obs, _HARVEST_RETURN_QUICK, [_NOT_QUEUED])
-        
+          
         # Build supply depot
-        if self.nb_supply_depot <= self.supply_depot_rate and self.supply_depot_in_construction == False \
-           and self.nb_supply_depot < 20:
+        if self.nb_supply_depot <= self.supply_depot_rate and self.supply_depot_in_construction == False:
             if has_enough_ressources(_SUPPLY_DEPOT_COST, resources):
                 return self.build_supply_depot(obs)
 
         # Train SCV
-        if self.scv_training_counter > 0 and self.scv_training_counter < 5:
+        if self.scv_training_counter > 0 and self.scv_training_counter < 3:
             self.scv_training_counter += 1
             return self.train_SCV(obs)
         self.scv_training_counter = 0
@@ -231,16 +244,17 @@ class Bot64(base_agent.BaseAgent):
             if has_enough_ressources([i * 5 for i in _SCV_COST], resources):
                 self.scv_training_counter += 1 # First increment
 
-        # Build refinery
-        if self.nb_supply_depot >= self.supply_depot_rate and self.nb_refineries < self.refineries_rate and self.refinery_in_construction == False:
-            if has_enough_ressources(_REFINERY_COST, resources):
-                return self.build_refinery(obs)
-
         # Build barrack
-        if self.nb_refineries >= self.refineries_rate and \
+        if self.nb_supply_depot >= self.supply_depot_rate and \
            self.nb_barracks < self.barracks_rate and self.barrack_in_construction == False:
             if has_enough_ressources(_BARRACKS_COST, resources):
                 return self.build_barrack(obs)
+
+        # Build refinery
+        if self.nb_barracks >= self.barracks_rate and \
+           self.nb_refineries < self.refineries_rate and self.refinery_in_construction == False:
+            if has_enough_ressources(_REFINERY_COST, resources):
+                return self.build_refinery(obs)
 
         # # Send idle workers to harvest
         # if self.nb_barracks >= self.barracks_rate:
@@ -261,17 +275,18 @@ class Bot64(base_agent.BaseAgent):
         self.marine_training_counter = 0
         
         # Turn on Marine training
-        if self.nb_barracks > 0 and self.nb_marines <= self.marines_rate:
+        if self.nb_barracks > 0 and self.nb_marines < self.marines_rate:
             if has_enough_ressources([i * 5 for i in _MARINE_COST], resources):
                 self.marine_training_counter += 1
-                if self.nb_marines > 20:
-                    self.supply_depot_rate += 3
 
-        # if self.nb_marines >= self.marines_rate:
-        #     self.supply_depot_rate += 5
-        #     self.barracks_rate += 1
-        #     self.scv_rate += 10
-        #     self.marines_rate += 5
+        # Increment rates
+        if self.nb_marines >= self.marines_rate:
+            if self.supply_depot_rate < 8:
+                self.supply_depot_rate += 3
+            self.barracks_rate += 1
+            self.scv_rate += 6
+            self.marines_rate += 7
+            return self.adjust_camera(obs)
 
         # print("no op")
         return _FUNCTIONS.no_op()
@@ -286,7 +301,7 @@ class Bot64(base_agent.BaseAgent):
             print("TARGET of payed refinery is [%d, %d]" %(target[0], target[1]))
             self.spent_on_refinery += sum(_REFINERY_COST)
             # return _FUNCTIONS.Move_screen("now", target)
-            return _FUNCTIONS.Build_Refinery_screen("now", target)
+            return _FUNCTIONS.Build_Refinery_screen("queued", target)
 
         self.inactive_scv_selected = False
         self.random_scv_selected = False
@@ -294,6 +309,7 @@ class Bot64(base_agent.BaseAgent):
         return _FUNCTIONS.no_op()
 
     def build_barrack(self,obs):
+        self.barrack_in_construction = True
         if self.inactive_scv_selected == False and self.random_scv_selected == False:
             return self.select_unit_or_building(obs, "scv")
 
@@ -303,23 +319,24 @@ class Bot64(base_agent.BaseAgent):
                 self.barrack_in_construction = False
                 return _FUNCTIONS.no_op()
             
-            self.barrack_in_construction = True
             print("Target of payed br is [%d, %d]" %(target[0], target[1]))
             self.spent_on_barracks += sum(_BARRACKS_COST)
+            print("Spent on barracks %d" %(self.spent_on_barracks))
             # return _FUNCTIONS.Move_screen("now", target)
-            return _FUNCTIONS.Build_Barracks_screen("now", target)
+            return _FUNCTIONS.Build_Barracks_screen("queued", target)
 
         print("failed")
+        self.barrack_in_construction = False
         return _FUNCTIONS.no_op()
     
     def build_supply_depot(self, obs):
         if self.inactive_scv_selected == False and self.random_scv_selected == False:
             return self.select_unit_or_building(obs, "scv")
 
-        if self.supply_depot_construction_tries > 10:
-            self.supply_depot_construction_tries = 0
-            return self.approach_camera_to_center(obs)
-            
+        # if self.supply_depot_construction_tries > 10:
+        #     self.supply_depot_construction_tries = 0
+        #     return self.approach_camera_to_center(obs)
+        
         if _BUILD_SUPPLYDEPOT_SCREEN in obs.observation.available_actions:
             target = self.get_new_supply_depot_location(obs)            
             if target == [-1,-1]:
@@ -374,27 +391,22 @@ class Bot64(base_agent.BaseAgent):
         if len(sp_y) == 0:
             if self.spawned_right_side:
                 #                            [29, 29]
-                self.barrack_last_location = [25, 25]
+                self.barrack_last_location = [25, 20]
             else:
                 self.barrack_last_location = [73, 25]
         else:
             rand_idx = randrange(len(sp_x))
-            print("randix is %d" %(rand_idx))
-            
-            if self.spawned_right_side:
-                self.barrack_last_location[0] = sp_y[rand_idx] + 5
-            else:
-                self.barrack_last_location[0] = sp_x[rand_idx] - 5
+            self.barrack_last_location[0] = sp_x[rand_idx] + randrange(-7,7)
+            self.barrack_last_location[1] = sp_y[rand_idx] + randrange(-7,7)
                 
             while self.barrack_last_location[0] < 0 or self.barrack_last_location[0] > 83 or \
                   self.barrack_last_location[1] < 0 or self.barrack_last_location[1] > 83:
                 rand_idx = randrange(len(sp_x))
-                print("randix is %d" %(rand_idx))
-                self.barrack_last_location[0] = sp_x[rand_idx] #+ (5 if self.spawned_right_side else -5)
-                self.barrack_last_location[1] = sp_y[rand_idx] #+ (5 if self.spawned_right_side else -5)
+                self.barrack_last_location[0] = sp_x[rand_idx] + randrange(-7,7)
+                self.barrack_last_location[1] = sp_y[rand_idx] + randrange(-7,7)
 
         return self.barrack_last_location
-                
+    
     def select_unit_or_building(self, obs, unit_or_building):
         if unit_or_building == "scv":
             # if self.inactive_scv_selected == False:
@@ -409,6 +421,7 @@ class Bot64(base_agent.BaseAgent):
                 self.inactive_scv_selected = False
                 self.commandcenter_selected = False
                 self.marine_selected = False
+                self.barrack_selected = False
                 unit_type = obs.observation.feature_screen[_UNIT_TYPE]
                 scv_y, scv_x = (unit_type == units.Terran.SCV).nonzero()
                 rand_idx = randrange(len(scv_y))
@@ -420,6 +433,7 @@ class Bot64(base_agent.BaseAgent):
                 self.inactive_scv_selected = False
                 self.random_scv_selected = False
                 self.marine_selected = False
+                self.barrack_selected = False
                 unit_type = obs.observation.feature_screen[_UNIT_TYPE]
                 commandcenter_y, commandcenter_x = (unit_type == units.Terran.CommandCenter).nonzero()
                 cc_center_x = numpy.mean(commandcenter_x, axis=0).round()
@@ -433,18 +447,22 @@ class Bot64(base_agent.BaseAgent):
                 self.inactive_scv_selected = False
                 self.random_scv_selected = False
                 self.marine_selected = False
-                # if self.nb_barracks > 1:
-                #     unit_type = obs.observation.feature_screen[_UNIT_TYPE]
-                #     br_y, br_x = (unit_type == units.Terran.Barracks).nonzero()
-                #     rand_idx = randrange(len(br_y))
-                #     target = [br_x[rand_idx], br_y[rand_idx]]
-                #     return define_action(obs, _SELECT_POINT, [_SCREEN, target])
+
+                if self.nb_barracks > 1:
+                    unit_type = obs.observation.feature_screen[_UNIT_TYPE]                    
+                    br_y, br_x = (unit_type == units.Terran.Barracks).nonzero()
+                    rand_idx = randrange(len(br_y))
+                    target = [br_x[rand_idx], br_y[rand_idx]]
+                    # return _FUNCTIONS.Move_screen("now", target)
+                    print("Selecting point [%d, %d]" %(target[0], target[1]))
+                    return _FUNCTIONS.select_point("select", target)
+                               
                 unit_type = obs.observation.feature_screen[_UNIT_TYPE]
                 y, x = (unit_type == units.Terran.Barracks).nonzero()
                 br_x = numpy.mean(x, axis=0).round()
                 br_y = numpy.mean(y, axis=0).round()
                 return _FUNCTIONS.select_point("select", [br_x, br_y])
-                            
+            
         return _FUNCTIONS.no_op()
 
     def train_SCV(self, obs):
@@ -468,12 +486,20 @@ class Bot64(base_agent.BaseAgent):
             self.spent_on_marines_training += sum(_MARINE_COST)
             print("started training of a marine")
             return _FUNCTIONS.Train_Marine_quick("queued")
+        print("something failed while trianing marine")
+        
         return _FUNCTIONS.no_op()
 
     def approach_camera_to_center(self, obs):
         dest = [39,45] if self.spawned_right_side else [20,23]
         return define_action(obs, _MOVE_CAMERA, [dest])
-    
+
+    def adjust_camera(self, obs):
+        self.locationL = [i+1 for i in self.locationL]
+        self.locationR = [i+1 for i in self.locationR]
+        dest = self.locationR if self.spawned_right_side else self.locationL
+        return define_action(obs, _MOVE_CAMERA, [dest])
+        
     def print_state(self):
         print("----------------------------")
         print("nb_scv %d/%d" %(self.nb_scv, self.scv_rate))
