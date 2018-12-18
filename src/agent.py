@@ -155,6 +155,7 @@ class Bot64(base_agent.BaseAgent):
 
         # flags
         # # selection
+        self.army_selected = False
         self.commandcenter_selected = False
         self.inactive_scv_selected = False
         self.all_inactive_scv_selected = False
@@ -202,7 +203,7 @@ class Bot64(base_agent.BaseAgent):
                 print("Spent minerals: %d, expected %d" %(spent_minerals, expected_spent_minerals))
                 # print("Failed to construct a barrack")
                 # self.spent_on_barracks -= sum(_BARRACKS_COST)
-                # self.barrack_in_construction = False
+                self.barrack_in_construction = False
             else:
                 print("Failed to construct a supply depot")
                 self.supply_depot_construction_tries += 1
@@ -220,16 +221,18 @@ class Bot64(base_agent.BaseAgent):
         if self.attack_mode_on:
             self.enemy = None
             self.enemy = _xy_locs(obs.observation.feature_screen.player_relative == _PLAYER_ENEMY)
-
-            if self.army_selected:
-                self.army_selected = False
-                return define_action(obs, _ATTACK_SCREEN, [self.camera_location])
             
             if self.enemy:
+                if self.army_selected:
+                    self.army_selected = False
+                    target = self.enemy[numpy.argmax(numpy.array(self.enemy)[:, 1])]
+                    return define_action(obs, _ATTACK_SCREEN, [_NOT_QUEUED, target])
+                
                 self.army_selected = True
                 return define_action(obs, _SELECT_RECT, [_SELECT, [0,0], [83,83]])
             else:
-                return _FUNCTIONS.no_op()
+                self.adjust_camera(1,1)
+                return define_action(obs, _MOVE_CAMERA, [self.camera_location])
                           
         # Build supply depot
         if self.nb_supply_depot <= self.supply_depot_rate and self.supply_depot_in_construction == False:
@@ -260,18 +263,6 @@ class Bot64(base_agent.BaseAgent):
             if has_enough_ressources(_REFINERY_COST, resources):
                 return self.build_refinery(obs)
 
-        # # Send idle workers to harvest
-        # if self.nb_barracks >= self.barracks_rate:
-        #     if not self.all_inactive_scv_selected and _SELECT_IDLE_WORKER in obs.observation.available_actions:
-        #         self.all_inactive_scv_selected = True
-        #         return _FUNCTIONS.select_idle_worker("select")
-        #     if self.all_inactive_scv_selected:
-        #         if _HARVEST_RETURN_QUICK in obs.observation.available_actions:
-        #             dest = get_mineral_coord(obs)
-        #             self.all_inactive_scv_selected = False
-        #             return _FUNCTIONS.Harvest_Gather_screen("queued", dest)
-        #             # return _FUNCTIONS.Harvest_Return_quick("queued")
-
         # Train Marine
         if self.marine_training_counter > 0 and self.marine_training_counter < 5:
             self.marine_training_counter += 1
@@ -287,19 +278,16 @@ class Bot64(base_agent.BaseAgent):
         if self.nb_marines >= self.marines_rate:
             if self.supply_depot_rate < 8:
                 self.supply_depot_rate += 3
-            if self.barracks_rate < 10:
+            if self.barracks_rate < 2:
                 self.barracks_rate += 1
             if self.scv_rate < 25:
                 self.scv_rate += 6
-            if self.marines_rate > 35:
+            if self.marines_rate > 60:
                 self.attack_mode_on = True
-                if self.camera_location[0] > 83 or self.camera_location[0] < 0:
-                    return self.adjust_camera(obs, -10, 1)
-                else:
-                    return self.adjust_camera(obs, 1, 0)
             else:
                 self.marines_rate += 7
-            return self.adjust_camera(obs, 1, 1)
+            self.adjust_camera(1, 1)
+            return define_action(obs, _MOVE_CAMERA, [self.camera_location])
 
         # print("no op")
         return _FUNCTIONS.no_op()
@@ -343,9 +331,9 @@ class Bot64(base_agent.BaseAgent):
         if self.inactive_scv_selected == False and self.random_scv_selected == False:
             return self.select_unit_or_building(obs, "scv")
 
-        # if self.supply_depot_construction_tries > 10:
-        #     self.supply_depot_construction_tries = 0
-        #     return self.approach_camera_to_center(obs)
+        if self.supply_depot_construction_tries > 10:
+            self.supply_depot_construction_tries = 0
+            return self.approach_camera_to_center(obs)
         
         if _BUILD_SUPPLYDEPOT_SCREEN in obs.observation.available_actions:
             target = self.get_new_supply_depot_location(obs)            
@@ -383,9 +371,9 @@ class Bot64(base_agent.BaseAgent):
             
             rand_idx = randrange(len(sp_x))
             if self.spawned_right_side:
-                self.supply_depot_last_location[1] = sp_y[rand_idx] + 5
+                self.supply_depot_last_location[1] = sp_y[rand_idx] + 4
             else:
-                self.supply_depot_last_location[1] = sp_y[rand_idx] - 5
+                self.supply_depot_last_location[1] = sp_y[rand_idx] - 4
                 
             while self.supply_depot_last_location[0] < 0 or self.supply_depot_last_location[0] > 83 or \
                   self.supply_depot_last_location[1] < 0 or self.supply_depot_last_location[1] > 83:
@@ -407,14 +395,14 @@ class Bot64(base_agent.BaseAgent):
                 self.barrack_last_location = [73, 25]
         else:
             rand_idx = randrange(len(sp_x))
-            self.barrack_last_location[0] = sp_x[rand_idx] + randrange(-10,10)
-            self.barrack_last_location[1] = sp_y[rand_idx] + randrange(-10,10)
+            self.barrack_last_location[0] = sp_x[rand_idx] + randrange(-5,5)
+            self.barrack_last_location[1] = sp_y[rand_idx] + randrange(-5,5)
                 
             while self.barrack_last_location[0] < 0 or self.barrack_last_location[0] > 83 or \
                   self.barrack_last_location[1] < 0 or self.barrack_last_location[1] > 83:
                 rand_idx = randrange(len(sp_x))
-                self.barrack_last_location[0] = sp_x[rand_idx] + randrange(-7,7)
-                self.barrack_last_location[1] = sp_y[rand_idx] + randrange(-7,7)
+                self.barrack_last_location[0] = sp_x[rand_idx] + randrange(-5,5)
+                self.barrack_last_location[1] = sp_y[rand_idx] + randrange(-5,5)
 
         return self.barrack_last_location
     
@@ -486,14 +474,16 @@ class Bot64(base_agent.BaseAgent):
         dest = [39,45] if self.spawned_right_side else [20,23]
         return define_action(obs, _MOVE_CAMERA, [dest])
 
-    def adjust_camera(self, obs, incX, incY):
-        if self.spawned_right_side:
-            self.camera_location[0]+= incX;
-            self.camera_location[1]+= incY;
+    def adjust_camera(self, incX, incY):
+        if self.camera_location[0]  + incX > 62 or self.camera_location[0] + incX < 2:
+            self.camera_location[0] = randrange(63)
         else:
-            self.camera_location[0]+= incX;
-            self.camera_location[1]+= incY;
-        return define_action(obs, _MOVE_CAMERA, [self.camera_location])
+            self.camera_location[0] += -1 if self.spawned_right_side else 1 * incX;
+
+        if self.camera_location[1]  + incY > 62 or self.camera_location[1] + incY < 2:
+            self.camera_location[1] = randrange(63)
+        else:
+            self.camera_location[1] += 1 if self.spawned_right_side else -1 * incY;
         
     def print_state(self):
         print("----------------------------")
