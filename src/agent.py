@@ -197,7 +197,7 @@ class Bot64(base_agent.BaseAgent):
                   
         self.prev_total_value_structures = total_value_structures
 
-        expected_spent_minerals = self.spent_on_supply_depots + self.spent_on_scv_training + self.spent_on_refinery + self.spent_on_barracks
+        expected_spent_minerals = self.spent_on_supply_depots + self.spent_on_scv_training + self.spent_on_refinery + self.spent_on_barracks + self.spent_on_marines_training
         if spent_minerals != expected_spent_minerals:
             if self.nb_supply_depot >= self.supply_depot_rate:
                 print("Spent minerals: %d, expected %d" %(spent_minerals, expected_spent_minerals))
@@ -277,7 +277,7 @@ class Bot64(base_agent.BaseAgent):
         # Increment rates
         if self.nb_marines >= self.marines_rate:
             if self.supply_depot_rate < 8:
-                self.supply_depot_rate += 3
+                self.supply_depot_rate += 1
             if self.barracks_rate < 2:
                 self.barracks_rate += 1
             if self.scv_rate < 25:
@@ -478,12 +478,12 @@ class Bot64(base_agent.BaseAgent):
         if self.camera_location[0]  + incX > 62 or self.camera_location[0] + incX < 2:
             self.camera_location[0] = randrange(63)
         else:
-            self.camera_location[0] += -1 if self.spawned_right_side else 1 * incX;
+            self.camera_location[0] += 1 if self.spawned_right_side else -1 * incX;
 
         if self.camera_location[1]  + incY > 62 or self.camera_location[1] + incY < 2:
             self.camera_location[1] = randrange(63)
         else:
-            self.camera_location[1] += 1 if self.spawned_right_side else -1 * incY;
+            self.camera_location[1] += -1 if self.spawned_right_side else 1 * incY;
         
     def print_state(self):
         print("----------------------------")
