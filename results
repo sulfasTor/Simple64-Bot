@@ -1,0 +1,20 @@
+I1219 18:35:29.485035 140336086599488 sc2_env.py:510] Episode 1 finished after 14184 game steps. Outcome: [-1], reward: [-1], score: [3455]
+
+I1219 18:37:18.933989 140336086599488 sc2_env.py:510] Episode 2 finished after 21320 game steps. Outcome: [-1], reward: [-1], score: [3542]
+
+I1219 18:38:44.554065 140336086599488 sc2_env.py:510] Episode 3 finished after 19248 game steps. Outcome: [-1], reward: [-1], score: [1332]
+
+I1219 18:40:13.833488 140336086599488 sc2_env.py:510] Episode 4 finished after 20200 game steps. Outcome: [-1], reward: [-1], score: [4309]
+
+I1219 18:52:42.237803 140301109274432 sc2_env.py:510] Episode 1 finished after 14456 game steps. Outcome: [-1], reward: [-1], score: [3916]
+
+I1219 18:56:49.519801 139810913306432 sc2_env.py:510] Episode 1 finished after 12080 game steps. Outcome: [-1], reward: [-1], score: [4178]
+
+I1219 18:58:51.747259 139810913306432 sc2_env.py:510] Episode 2 finished after 25000 game steps. Outcome: [-1], reward: [-1], score: [2335]
+
+I1219 19:00:49.969027 139810913306432 sc2_env.py:510] Episode 3 finished after 21720 game steps. Outcome: [-1], reward: [-1], score: [4080]
+
+I1219 19:08:09.782818 140159554033472 sc2_env.py:510] Episode 1 finished after 18152 game steps. Outcome: [-1], reward: [-1], score: [3738]
+
+I1219 19:09:36.545087 140159554033472 sc2_env.py:510] Episode 2 finished after 19288 game steps. Outcome: [-1], reward: [-1], score: [4137]
+

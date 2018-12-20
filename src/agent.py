@@ -1,10 +1,29 @@
+# Bot Simple 64
+# Copyright (C) 2018, Moises TORRES, Adham EL KARN
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or (at
+# your option) any later version.
+
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+# General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307
+# USA.
+# Run with:
+# python3 -m pysc2.bin.agent --map Simple64 --agent agent.Bot64 --agent_race terran --difficulty medium
+
 from pysc2.agents import base_agent
 from pysc2.lib import actions
 from pysc2.lib import features
 from pysc2.lib import units
 from random import randrange
 from time import sleep
-
 import sys, numpy, math
 
 # Features
@@ -46,6 +65,7 @@ _MARINE_COST = [50, 0]
 _MARAUDER_COST = [100, 25]
 
 def _xy_locs(mask):
+    """ Removes zero coordinates from the observation list """
     y, x = mask.nonzero()
     return list(zip(x, y))
 
@@ -53,6 +73,7 @@ def printf(format, *args):
     sys.stdout.write(format % args)
     
 def erode_with_min(screen):
+    """ Remove edge coordinates """
     output = [] 
     for i in range(84):
         output.append([0] * 84)
@@ -66,22 +87,19 @@ def erode_with_min(screen):
                                        screen[i][j-1]))
     return output
 
-def print_screen(mine):
-    for i in range(0,84) :
-        for j in range(0,84) :
-            printf("%d", mine[i][j])
-            print("")
-
 def define_action(obs, action_id, args=[]):
+    """ Verify if the action is available otherwise return no_op """
     if action_id in obs.observation.available_actions:
         return actions.FunctionCall(action_id, args)
     else:
         return actions.FunctionCall(_NO_OP, [])
 
 def has_enough_ressources(wanted_ressource, ressources):
+    """ Verify if the wanted ressource can be build """
     return wanted_ressource[0] <= ressources[0] and wanted_ressource[1] <= ressources[1]
 
 def get_mineral_coord(obs):
+    """ Gets mineral location """
     unit_type = obs.observation.feature_screen[_UNIT_TYPE]
     mine = (unit_type == units.Neutral.MineralField)
     mine = erode_with_min(mine)
@@ -89,6 +107,7 @@ def get_mineral_coord(obs):
     return [mineral_x[0], mineral_y[0]]
 
 def get_vespene_coord(obs):
+    """ Gets vespene location """
     unit_type = obs.observation.feature_screen[_UNIT_TYPE]
     vesp_y, vesp_x = (unit_type == units.Neutral.VespeneGeyser).nonzero()
     rand_idx = randrange(len(vesp_y))
@@ -97,17 +116,17 @@ def get_vespene_coord(obs):
     return [x, y]
 
 def get_barracks_coord(obs):
+    """ Gets barracks location """
     unit_type = obs.observation.feature_screen[_UNIT_TYPE]
     br = (unit_type == units.Terran. Barracks)
     br = erode_with_min(br)
     br_y, br_x = numpy.array(br).nonzero()
     rand_idx = randrange(len(br_y))
     return [br_x[rand_idx], br_y[rand_idx]]
-    
 
-# python3 -m pysc2.bin.agent --map Simple64 --agent agent.Bot64 --agent_race terran
+
 class Bot64(base_agent.BaseAgent):
-
+    """ Agent for the Simple 64 map"""
     def __init__(self):
         super(Bot64, self).__init__()
 
@@ -174,9 +193,12 @@ class Bot64(base_agent.BaseAgent):
         self.refinery_in_construction = False
 
     def update_buildings(self, obs):
+        """ Update building observation and compares with expected values """
+        
         total_value_structures = obs.observation.score_cumulative.total_value_structures
         spent_minerals = obs.observation.score_cumulative.spent_minerals
 
+        # Verifies if a building was not finished
         if total_value_structures != self.prev_total_value_structures:
             diff = (total_value_structures - self.prev_total_value_structures)
             if self.nb_supply_depot < self.supply_depot_rate:
@@ -197,6 +219,7 @@ class Bot64(base_agent.BaseAgent):
                   
         self.prev_total_value_structures = total_value_structures
 
+        # Verifies if a building was not built because of a wrong location
         expected_spent_minerals = self.spent_on_supply_depots + self.spent_on_scv_training + self.spent_on_refinery + self.spent_on_barracks + self.spent_on_marines_training
         if spent_minerals != expected_spent_minerals:
             if self.nb_supply_depot >= self.supply_depot_rate:
@@ -221,7 +244,7 @@ class Bot64(base_agent.BaseAgent):
         if self.attack_mode_on:
             self.enemy = None
             self.enemy = _xy_locs(obs.observation.feature_screen.player_relative == _PLAYER_ENEMY)
-            
+
             if self.enemy:
                 if self.army_selected:
                     self.army_selected = False
@@ -239,7 +262,7 @@ class Bot64(base_agent.BaseAgent):
             if has_enough_ressources(_SUPPLY_DEPOT_COST, resources):
                 return self.build_supply_depot(obs)
 
-        # Train SCV
+        # Train SCV up to 3 queued trainings
         if self.scv_training_counter > 0 and self.scv_training_counter < 3:
             self.scv_training_counter += 1
             return self.train_SCV(obs)
@@ -293,6 +316,7 @@ class Bot64(base_agent.BaseAgent):
         return _FUNCTIONS.no_op()
 
     def build_refinery(self, obs):
+        # First selects a worker
         if self.inactive_scv_selected == False and self.random_scv_selected == False:
             return self.select_unit_or_building(obs, "scv")
 
@@ -304,9 +328,9 @@ class Bot64(base_agent.BaseAgent):
             # return _FUNCTIONS.Move_screen("now", target)
             return _FUNCTIONS.Build_Refinery_screen("queued", target)
 
+        # Selection failed
         self.inactive_scv_selected = False
         self.random_scv_selected = False
-        print("\nFailed to select %s \n" %("a random worker" if self.random_scv_selected else ("a idle worker" if self.inactive_scv_selected else "anything")))
         return _FUNCTIONS.no_op()
 
     def build_barrack(self,obs):
@@ -324,13 +348,14 @@ class Bot64(base_agent.BaseAgent):
             # return _FUNCTIONS.Move_screen("now", target)
             return _FUNCTIONS.Build_Barracks_screen("queued", target)
 
-        print("failed")
+        print("selection failed")
         return _FUNCTIONS.no_op()
     
     def build_supply_depot(self, obs):
         if self.inactive_scv_selected == False and self.random_scv_selected == False:
             return self.select_unit_or_building(obs, "scv")
 
+        # if could not build in the last 10 supplies then move the camera
         if self.supply_depot_construction_tries > 10:
             self.supply_depot_construction_tries = 0
             return self.approach_camera_to_center(obs)
@@ -346,9 +371,9 @@ class Bot64(base_agent.BaseAgent):
             self.spent_on_supply_depots += sum(_SUPPLY_DEPOT_COST)
             return _FUNCTIONS.Build_SupplyDepot_screen("queued", target)
 
+        # Failed selection
         self.inactive_scv_selected = False
         self.random_scv_selected = False
-        print("\nFailed to select %s \n" %("a random worker" if self.random_scv_selected else ("a idle worker" if self.inactive_scv_selected else "anything")))
         return _FUNCTIONS.no_op()
 
     def get_new_supply_depot_location(self, obs):
@@ -357,6 +382,7 @@ class Bot64(base_agent.BaseAgent):
             y_coord = (unit_type == units.Neutral.MineralField).nonzero()[0]
             self.spawned_right_side = numpy.mean(y_coord, axis=0).round() > 42
 
+            # Checks if we are on the right of left side of the map
             if self.spawned_right_side:
                 self.supply_depot_last_location = [10, 10]
             else:
@@ -368,13 +394,15 @@ class Bot64(base_agent.BaseAgent):
             if sp_x == []:
                 self.supply_depot_last_location = [-1,-1]
                 return self.supply_depot_last_location
-            
+
+            # Chooses a random coordinate from the observation list
             rand_idx = randrange(len(sp_x))
             if self.spawned_right_side:
                 self.supply_depot_last_location[1] = sp_y[rand_idx] + 4
             else:
                 self.supply_depot_last_location[1] = sp_y[rand_idx] - 4
-                
+
+            # Avoid boundary violation
             while self.supply_depot_last_location[0] < 0 or self.supply_depot_last_location[0] > 83 or \
                   self.supply_depot_last_location[1] < 0 or self.supply_depot_last_location[1] > 83:
                 rand_idx = randrange(len(sp_x))
@@ -394,6 +422,7 @@ class Bot64(base_agent.BaseAgent):
             else:
                 self.barrack_last_location = [73, 25]
         else:
+            # Randomly selects a location
             rand_idx = randrange(len(sp_x))
             self.barrack_last_location[0] = sp_x[rand_idx] + randrange(-5,5)
             self.barrack_last_location[1] = sp_y[rand_idx] + randrange(-5,5)
@@ -407,6 +436,7 @@ class Bot64(base_agent.BaseAgent):
         return self.barrack_last_location
     
     def select_unit_or_building(self, obs, unit_or_building):
+        """ Selects a unit or a building using observation object """
         if unit_or_building == "scv":
             if self.random_scv_selected == False:
                 self.random_scv_selected = True
@@ -445,6 +475,7 @@ class Bot64(base_agent.BaseAgent):
         return _FUNCTIONS.no_op()
 
     def train_SCV(self, obs):
+        """ Trains a worker """
         if self.commandcenter_selected == False:
             return self.select_unit_or_building(obs, "cc")
         
@@ -456,6 +487,7 @@ class Bot64(base_agent.BaseAgent):
         return actions.FUNCTIONS.no_op()
 
     def train_Marine(self, obs):
+        """ Trains a soldier """
         if self.barrack_selected == False:
             return self.select_unit_or_building(obs, "br")
         
@@ -475,6 +507,7 @@ class Bot64(base_agent.BaseAgent):
         return define_action(obs, _MOVE_CAMERA, [dest])
 
     def adjust_camera(self, incX, incY):
+        """ Adjusts camera and avoids boundary violation """
         if self.camera_location[0]  + incX > 62 or self.camera_location[0] + incX < 2:
             self.camera_location[0] = randrange(63)
         else:
