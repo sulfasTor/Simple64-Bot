@@ -106,3 +106,6 @@ venv.bak/
 # others
 *.
 #*__pycache__
+*.zip
+results
+*.org
